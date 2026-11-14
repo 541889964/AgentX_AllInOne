@@ -17,6 +17,6 @@ android {
     }
 }
 dependencies {
-    // 移除了 appcompat，纯原生不闪退
+    implementation 'androidx.appcompat:appcompat:1.6.1'
     compileOnly 'de.robv.android.xposed:api:82'
 }
