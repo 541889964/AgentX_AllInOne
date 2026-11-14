@@ -1,18 +1,18 @@
 package com.superrouter.agentxallinone
 
+import android.app.Activity
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.PrintWriter
 import java.net.Socket
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : Activity() {
     private lateinit var tvResult: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,10 +56,10 @@ class MainActivity : AppCompatActivity() {
                 resultMsg = if (response == "PONG_FROM_OFFICIAL_APP") {
                     "✅ 连接成功！\n\n你的应用已经可以完美借用官方算力了。"
                 } else {
-                    "⚠️ 收到未知响应：$response\n\n可能是模块版本不对。"
+                    "⚠️ 收到未知响应：$response"
                 }
             } catch (e: Exception) {
-                resultMsg = "❌ 连接失败：${e.message}\n\n排查建议：\n1. 是否在 LSPosed 勾选了官方 DeepSeek？\n2. 是否重启了手机？\n3. 官方 DeepSeek 是否在后台存活？"
+                resultMsg = "❌ 连接失败：${e.message}\n\n排查建议：\n1. LSPosed 是否勾选 DeepSeek？\n2. 是否重启了手机？\n3. 官方 DeepSeek 是否在后台存活？"
             }
 
             Handler(Looper.getMainLooper()).post {
