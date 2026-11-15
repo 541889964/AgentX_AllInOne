@@ -4,7 +4,9 @@ import android.app.Activity
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.method.ScrollingMovementMethod
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import java.io.BufferedReader
@@ -14,56 +16,70 @@ import java.net.Socket
 
 class MainActivity : Activity() {
     private lateinit var tvResult: TextView
+    private lateinit var etToken: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(60, 150, 60, 50)
+            setPadding(40, 100, 40, 40)
         }
         
-        tvResult = TextView(this).apply {
-            textSize = 18f
-            text = "请先去 LSPosed 激活本模块并勾选 DeepSeek。\n\n确保官方 DeepSeek 已在后台运行。"
+        etToken = EditText(this).apply {
+            hint = "输入官方 Token (不填用兜底)"
+            textSize = 14f
         }
         
         val btnTest = Button(this).apply {
-            text = "开始测试联通"
+            text = "发送真实请求测试"
             setOnClickListener {
-                tvResult.text = "正在尝试连接 127.0.0.1:13579 ..."
-                runTest()
+                tvResult.text = "正在请求官方服务器..."
+                runRealTest(etToken.text.toString().trim())
             }
         }
         
+        tvResult = TextView(this).apply {
+            textSize = 12f
+            setPadding(0, 30, 0, 0)
+            movementMethod = ScrollingMovementMethod()
+            text = "等待测试..."
+        }
+        
+        layout.addView(etToken)
         layout.addView(btnTest)
         layout.addView(tvResult)
         setContentView(layout)
     }
 
-    private fun runTest() {
+    private fun runRealTest(inputToken: String) {
         Thread {
-            var resultMsg = ""
             try {
                 val socket = Socket("127.0.0.1", 13579)
                 val out = PrintWriter(socket.getOutputStream(), true)
                 val input = BufferedReader(InputStreamReader(socket.getInputStream()))
 
-                out.println("PING")
-                val response = input.readLine() ?: "无响应"
-                socket.close()
-                
-                resultMsg = if (response == "PONG_FROM_OFFICIAL_APP") {
-                    "✅ 连接成功！\n\n你的应用已经可以完美借用官方算力了。"
-                } else {
-                    "⚠️ 收到未知响应：$response"
-                }
-            } catch (e: Exception) {
-                resultMsg = "❌ 连接失败：${e.message}\n\n排查建议：\n1. 确认LSPosed已勾选DeepSeek并重启\n2. 确认官方App正在后台运行"
-            }
+                // 发送真实请求指令，带上 Token
+                val tokenToUse = if (inputToken.isNotBlank()) inputToken else "FALLBACK"
+                out.println("REAL_TEST:$tokenToUse")
 
-            Handler(Looper.getMainLooper()).post {
-                tvResult.text = resultMsg
+                // 读取官方返回的每一行原始数据，立刻展示
+                var line: String?
+                val sb = StringBuilder()
+                while (true) {
+                    line = input.readLine() ?: break
+                    sb.append(line).append("\n")
+                    
+                    val finalText = sb.toString()
+                    Handler(Looper.getMainLooper()).post {
+                        tvResult.text = finalText
+                    }
+                }
+                socket.close()
+            } catch (e: Exception) {
+                Handler(Looper.getMainLooper()).post {
+                    tvResult.text = "❌ 测试异常：${e.message}"
+                }
             }
         }.start()
     }
