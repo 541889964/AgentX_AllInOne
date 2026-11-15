@@ -77,11 +77,11 @@ class MainHook : IXposedHookLoadPackage {
         try {
             val (token, smid) = getOfficialCredentials()
             if (token.isBlank()) {
-                writer.println("ERROR: 无法从 MMKV 提取 Token，请确保官方 App 已登录。")
+                writer.println("ERROR: 无法从 MMKV 提取 Token。")
                 return
             }
             
-            writer.println("✅ 成功提取 Token: ${token.take(10)}... (SMID: ${smid.take(10)}...)")
+            writer.println("✅ 成功提取 Token: ${token.take(10)}...")
             writer.println("--- 开始请求官方服务器 ---")
 
             // 1. 申请挑战
@@ -109,11 +109,17 @@ class MainHook : IXposedHookLoadPackage {
             val difficulty = dataJson.getLong("difficulty")
             val signature = dataJson.getString("signature")
 
-            // 2. 借用底层算力
+            // 2. 借用底层算力 (加入防崩容错)
             val baseStr = "${salt}_${expireAt}_"
-            val powClass = XposedHelpers.findClass("com.deepseek.crypto.PowCalculator", classLoader)
-            val answer = XposedHelpers.callStaticMethod(powClass, "nativeCalculateDeepSeekHashV1Pow", challenge, baseStr, difficulty) as Long
-            writer.println("✅ PoW 计算成功: $answer")
+            var answer: Long = 0
+            try {
+                val powClass = XposedHelpers.findClass("com.deepseek.crypto.PowCalculator", classLoader)
+                answer = XposedHelpers.callStaticMethod(powClass, "nativeCalculateDeepSeekHashV1Pow", challenge, baseStr, difficulty) as Long
+                writer.println("✅ PoW 计算成功: $answer")
+            } catch (e: Throwable) {
+                writer.println("⚠️ 找不到官方算力类: ${e.message}")
+                writer.println("--- 强行发送假 PoW 获取官方原样报错 ---")
+            }
 
             // 3. 发起对话
             val urlChat = URL("https://chat.deepseek.com/api/v0/chat/completion")
@@ -121,7 +127,7 @@ class MainHook : IXposedHookLoadPackage {
             connChat.requestMethod = "POST"
             connChat.setRequestProperty("Authorization", "Bearer $token")
             connChat.setRequestProperty("Content-Type", "application/json")
-            connChat.setRequestProperty("Accept", "text/event-stream") // ★ 必须加上，否则拿不到流
+            connChat.setRequestProperty("Accept", "text/event-stream")
             connChat.setRequestProperty("x-device-id", smid)
             connChat.setRequestProperty("x-client-platform", "android")
             connChat.setRequestProperty("x-client-version", "2.8.0")
@@ -148,7 +154,7 @@ class MainHook : IXposedHookLoadPackage {
                 return
             }
 
-            // 4. 读取流并原样写出
+            // 4. 原样读取
             val reader = BufferedReader(InputStreamReader(stream2))
             var line: String?
             while (true) {
