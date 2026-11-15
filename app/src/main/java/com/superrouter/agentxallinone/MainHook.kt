@@ -1,6 +1,5 @@
 package com.superrouter.agentxallinone
 
-import android.util.Log
 import de.robv.android.xposed.*
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.io.BufferedReader
@@ -8,17 +7,16 @@ import java.io.InputStreamReader
 import java.io.PrintWriter
 import java.net.ServerSocket
 import java.net.Socket
-import okhttp3.OkHttpClient
-import okhttp3.Request
 
 class MainHook : IXposedHookLoadPackage {
-    private val client = OkHttpClient()
-
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
-        // 当勾选的是官方 DeepSeek 时，启动幽灵代理服务
         if (lpparam.packageName == "com.deepseek.chat") {
-            XposedBridge.log("【AgentX】寄生成功，正在启动代理服务...")
-            startProxyServer(lpparam.classLoader)
+            try {
+                XposedBridge.log("【AgentX】准备启动代理服务...")
+                startProxyServer(lpparam.classLoader)
+            } catch (e: Throwable) {
+                XposedBridge.log("【AgentX】启动出错: ${e.message}")
+            }
         }
     }
 
@@ -26,12 +24,13 @@ class MainHook : IXposedHookLoadPackage {
         Thread {
             try {
                 val server = ServerSocket(13579)
+                XposedBridge.log("【AgentX】代理服务已监听 13579")
                 while (true) {
                     val socket = server.accept()
                     Thread { handleClient(socket, classLoader) }.start()
                 }
             } catch (e: Exception) {
-                XposedBridge.log("代理服务异常: ${e.message}")
+                XposedBridge.log("【AgentX】端口监听失败: ${e.message}")
             }
         }.start()
     }
@@ -51,6 +50,8 @@ class MainHook : IXposedHookLoadPackage {
                 writer.println("OK:$answer")
             }
             socket.close()
-        } catch (e: Exception) { }
+        } catch (e: Throwable) {
+            XposedBridge.log("【AgentX】客户端处理异常: ${e.message}")
+        }
     }
 }

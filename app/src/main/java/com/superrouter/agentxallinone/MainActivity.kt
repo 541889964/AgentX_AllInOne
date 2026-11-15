@@ -1,18 +1,18 @@
 package com.superrouter.agentxallinone
 
+import android.app.Activity
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.PrintWriter
 import java.net.Socket
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : Activity() {
     private lateinit var tvResult: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,7 +31,7 @@ class MainActivity : AppCompatActivity() {
         val btnTest = Button(this).apply {
             text = "开始测试联通"
             setOnClickListener {
-                tvResult.text = "正在尝试连接官方代理端口 (13579)..."
+                tvResult.text = "正在尝试连接 127.0.0.1:13579 ..."
                 runTest()
             }
         }
@@ -43,7 +43,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun runTest() {
         Thread {
-            val resultMsg: String
+            var resultMsg = ""
             try {
                 val socket = Socket("127.0.0.1", 13579)
                 val out = PrintWriter(socket.getOutputStream(), true)
@@ -56,10 +56,10 @@ class MainActivity : AppCompatActivity() {
                 resultMsg = if (response == "PONG_FROM_OFFICIAL_APP") {
                     "✅ 连接成功！\n\n你的应用已经可以完美借用官方算力了。"
                 } else {
-                    "⚠️ 收到未知响应：$response\n\n可能是模块版本不对。"
+                    "⚠️ 收到未知响应：$response"
                 }
             } catch (e: Exception) {
-                resultMsg = "❌ 连接失败：${e.message}\n\n排查建议：\n1. 是否在 LSPosed 勾选了官方 DeepSeek？\n2. 是否重启了手机？\n3. 官方 DeepSeek 是否在后台存活？"
+                resultMsg = "❌ 连接失败：${e.message}\n\n排查建议：\n1. 确认LSPosed已勾选DeepSeek并重启\n2. 确认官方App正在后台运行"
             }
 
             Handler(Looper.getMainLooper()).post {
