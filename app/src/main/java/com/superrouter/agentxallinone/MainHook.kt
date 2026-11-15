@@ -17,7 +17,6 @@ import java.util.regex.Pattern
 class MainHook : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName == "com.deepseek.chat") {
-            XposedBridge.log("【AgentX】模块已加载，启动服务...")
             startProxyServer(lpparam.classLoader)
         }
     }
@@ -49,7 +48,6 @@ class MainHook : IXposedHookLoadPackage {
         } catch (e: Throwable) { }
     }
 
-    // ★ 核心：直接读取官方 App 私有目录下的 MMKV 提取凭证
     private fun getOfficialCredentials(): Pair<String, String> {
         var token = ""
         var smid = ""
@@ -63,11 +61,16 @@ class MainHook : IXposedHookLoadPackage {
                 val smidMatcher = Pattern.compile("\\b[a-zA-Z0-9_\\-+/=]{70,120}\\b").matcher(content)
                 if (smidMatcher.find()) smid = smidMatcher.group() ?: ""
             }
-        } catch (e: Exception) {
-            XposedBridge.log("【AgentX】读取凭证异常: ${e.message}")
-        }
+        } catch (e: Exception) { }
         if (smid.isBlank()) smid = UUID.randomUUID().toString().replace("-", "")
         return Pair(token, smid)
+    }
+
+    private fun readStream(conn: HttpURLConnection): String {
+        val code = conn.responseCode
+        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+        if (stream == null) return "HTTP $code: 无返回数据"
+        return BufferedReader(InputStreamReader(stream)).readText()
     }
 
     private fun doRealRequest(classLoader: ClassLoader, writer: PrintWriter) {
@@ -90,11 +93,12 @@ class MainHook : IXposedHookLoadPackage {
             connChallenge.doOutput = true
             connChallenge.outputStream.write("{\"target_path\":\"/api/v0/chat/completion\"}".toByteArray())
 
-            val resChallenge = BufferedReader(InputStreamReader(connChallenge.inputStream)).readText()
+            val resChallenge = readStream(connChallenge)
+            writer.println("挑战结果: $resChallenge")
+            
             val rootJson = JSONObject(resChallenge)
-
             if (rootJson.has("code") && rootJson.getInt("code") != 0) {
-                writer.println("SERVER_ERROR:${rootJson.toString()}")
+                writer.println("SERVER_ERROR:${rootJson}")
                 return
             }
 
@@ -117,14 +121,17 @@ class MainHook : IXposedHookLoadPackage {
             connChat.requestMethod = "POST"
             connChat.setRequestProperty("Authorization", "Bearer $token")
             connChat.setRequestProperty("Content-Type", "application/json")
+            connChat.setRequestProperty("Accept", "text/event-stream") // ★ 必须加上，否则拿不到流
             connChat.setRequestProperty("x-device-id", smid)
             connChat.setRequestProperty("x-client-platform", "android")
             connChat.setRequestProperty("x-client-version", "2.8.0")
-            connChat.setRequestProperty("x-ds-pow-response", java.util.Base64.getEncoder().encodeToString(
+            
+            val powBase64 = java.util.Base64.getEncoder().encodeToString(
                 JSONObject().put("algorithm", "DeepSeekHashV1").put("challenge", challenge)
                 .put("salt", salt).put("answer", answer).put("signature", signature)
                 .put("target_path", "/api/v0/chat/completion").toString().toByteArray()
-            ))
+            )
+            connChat.setRequestProperty("x-ds-pow-response", powBase64)
             connChat.doOutput = true
 
             val body = JSONObject()
@@ -134,8 +141,15 @@ class MainHook : IXposedHookLoadPackage {
                 .put("search_enabled", false)
             connChat.outputStream.write(body.toString().toByteArray())
 
-            // 4. 原样读取流
-            val reader = BufferedReader(InputStreamReader(connChat.inputStream))
+            val code2 = connChat.responseCode
+            val stream2 = if (code2 in 200..299) connChat.inputStream else connChat.errorStream
+            if (stream2 == null) {
+                writer.println("CLIENT_ERROR: HTTP $code2 无返回流")
+                return
+            }
+
+            // 4. 读取流并原样写出
+            val reader = BufferedReader(InputStreamReader(stream2))
             var line: String?
             while (true) {
                 line = reader.readLine() ?: break
