@@ -4,6 +4,7 @@ import de.robv.android.xposed.*
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.io.PrintWriter
 import java.net.HttpURLConnection
@@ -11,10 +12,12 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.URL
 import java.util.UUID
+import java.util.regex.Pattern
 
 class MainHook : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName == "com.deepseek.chat") {
+            XposedBridge.log("【AgentX】模块已加载，启动服务...")
             startProxyServer(lpparam.classLoader)
         }
     }
@@ -39,18 +42,44 @@ class MainHook : IXposedHookLoadPackage {
 
             if (request == "PING") {
                 writer.println("PONG_FROM_OFFICIAL_APP")
-            } else if (request.startsWith("REAL_TEST:")) {
-                val token = request.substring(10)
-                doRealRequest(token, classLoader, writer)
+            } else if (request == "REAL_TEST") {
+                doRealRequest(classLoader, writer)
             }
             socket.close()
         } catch (e: Throwable) { }
     }
 
-    private fun doRealRequest(inputToken: String, classLoader: ClassLoader, writer: PrintWriter) {
+    // ★ 核心：直接读取官方 App 私有目录下的 MMKV 提取凭证
+    private fun getOfficialCredentials(): Pair<String, String> {
+        var token = ""
+        var smid = ""
         try {
-            val token = if (inputToken == "FALLBACK") "Ly2zddwXUmMZKl/sv3BbEn2l6QGLURdGW8PpDiaLRqKZFl6zr/xQF3JHKZKcjUGE" else inputToken
-            val smid = UUID.randomUUID().toString().replace("-", "")
+            val file = File("/data/data/com.deepseek.chat/files/mmkv/mmkv.default")
+            if (file.exists()) {
+                val content = file.readText(Charsets.ISO_8859_1)
+                val tokenMatcher = Pattern.compile("\\b[a-zA-Z0-9+/=]{64}\\b").matcher(content)
+                if (tokenMatcher.find()) token = tokenMatcher.group() ?: ""
+                
+                val smidMatcher = Pattern.compile("\\b[a-zA-Z0-9_\\-+/=]{70,120}\\b").matcher(content)
+                if (smidMatcher.find()) smid = smidMatcher.group() ?: ""
+            }
+        } catch (e: Exception) {
+            XposedBridge.log("【AgentX】读取凭证异常: ${e.message}")
+        }
+        if (smid.isBlank()) smid = UUID.randomUUID().toString().replace("-", "")
+        return Pair(token, smid)
+    }
+
+    private fun doRealRequest(classLoader: ClassLoader, writer: PrintWriter) {
+        try {
+            val (token, smid) = getOfficialCredentials()
+            if (token.isBlank()) {
+                writer.println("ERROR: 无法从 MMKV 提取 Token，请确保官方 App 已登录。")
+                return
+            }
+            
+            writer.println("✅ 成功提取 Token: ${token.take(10)}... (SMID: ${smid.take(10)}...)")
+            writer.println("--- 开始请求官方服务器 ---")
 
             // 1. 申请挑战
             val urlChallenge = URL("https://chat.deepseek.com/api/v0/chat/create_pow_challenge")
@@ -62,20 +91,27 @@ class MainHook : IXposedHookLoadPackage {
             connChallenge.outputStream.write("{\"target_path\":\"/api/v0/chat/completion\"}".toByteArray())
 
             val resChallenge = BufferedReader(InputStreamReader(connChallenge.inputStream)).readText()
-            val challengeJson = JSONObject(resChallenge).getJSONObject("data").getJSONObject("biz_data").getJSONObject("challenge")
+            val rootJson = JSONObject(resChallenge)
 
-            val challenge = challengeJson.getString("challenge")
-            val salt = challengeJson.getString("salt")
-            val expireAt = challengeJson.getLong("expire_at")
-            val difficulty = challengeJson.getLong("difficulty")
-            val signature = challengeJson.getString("signature")
+            if (rootJson.has("code") && rootJson.getInt("code") != 0) {
+                writer.println("SERVER_ERROR:${rootJson.toString()}")
+                return
+            }
 
-            // 2. 借用算力
+            val dataJson = rootJson.getJSONObject("data").getJSONObject("biz_data").getJSONObject("challenge")
+            val challenge = dataJson.getString("challenge")
+            val salt = dataJson.getString("salt")
+            val expireAt = dataJson.getLong("expire_at")
+            val difficulty = dataJson.getLong("difficulty")
+            val signature = dataJson.getString("signature")
+
+            // 2. 借用底层算力
             val baseStr = "${salt}_${expireAt}_"
             val powClass = XposedHelpers.findClass("com.deepseek.crypto.PowCalculator", classLoader)
             val answer = XposedHelpers.callStaticMethod(powClass, "nativeCalculateDeepSeekHashV1Pow", challenge, baseStr, difficulty) as Long
+            writer.println("✅ PoW 计算成功: $answer")
 
-            // 3. 发起真实对话请求
+            // 3. 发起对话
             val urlChat = URL("https://chat.deepseek.com/api/v0/chat/completion")
             val connChat = urlChat.openConnection() as HttpURLConnection
             connChat.requestMethod = "POST"
@@ -98,7 +134,7 @@ class MainHook : IXposedHookLoadPackage {
                 .put("search_enabled", false)
             connChat.outputStream.write(body.toString().toByteArray())
 
-            // 4. 原样转发官方返回的流数据
+            // 4. 原样读取流
             val reader = BufferedReader(InputStreamReader(connChat.inputStream))
             var line: String?
             while (true) {
@@ -106,7 +142,7 @@ class MainHook : IXposedHookLoadPackage {
                 writer.println(line)
             }
         } catch (e: Throwable) {
-            writer.println("ERR:${e.message}")
+            writer.println("CLIENT_ERROR:${e.message}")
         }
     }
 }

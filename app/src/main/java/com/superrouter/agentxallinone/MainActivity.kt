@@ -6,7 +6,6 @@ import android.os.Handler
 import android.os.Looper
 import android.text.method.ScrollingMovementMethod
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import java.io.BufferedReader
@@ -16,7 +15,6 @@ import java.net.Socket
 
 class MainActivity : Activity() {
     private lateinit var tvResult: TextView
-    private lateinit var etToken: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -26,44 +24,36 @@ class MainActivity : Activity() {
             setPadding(40, 100, 40, 40)
         }
         
-        etToken = EditText(this).apply {
-            hint = "输入官方 Token (不填用兜底)"
-            textSize = 14f
-        }
-        
         val btnTest = Button(this).apply {
-            text = "发送真实请求测试"
+            text = "内置提取凭证并发送真实请求"
             setOnClickListener {
-                tvResult.text = "正在请求官方服务器..."
-                runRealTest(etToken.text.toString().trim())
+                tvResult.text = "正在通过 LSPosed 提取官方凭证并请求网络..."
+                runRealTest()
             }
         }
         
         tvResult = TextView(this).apply {
-            textSize = 12f
+            textSize = 11f
             setPadding(0, 30, 0, 0)
             movementMethod = ScrollingMovementMethod()
-            text = "等待测试..."
+            text = "点击上方按钮开始测试\n\n如果成功，下方会滚动显示官方最原始的 SSE 数据流。"
         }
         
-        layout.addView(etToken)
         layout.addView(btnTest)
         layout.addView(tvResult)
         setContentView(layout)
     }
 
-    private fun runRealTest(inputToken: String) {
+    private fun runRealTest() {
         Thread {
             try {
                 val socket = Socket("127.0.0.1", 13579)
                 val out = PrintWriter(socket.getOutputStream(), true)
                 val input = BufferedReader(InputStreamReader(socket.getInputStream()))
 
-                // 发送真实请求指令，带上 Token
-                val tokenToUse = if (inputToken.isNotBlank()) inputToken else "FALLBACK"
-                out.println("REAL_TEST:$tokenToUse")
+                // 发送真实请求指令
+                out.println("REAL_TEST")
 
-                // 读取官方返回的每一行原始数据，立刻展示
                 var line: String?
                 val sb = StringBuilder()
                 while (true) {
@@ -78,7 +68,7 @@ class MainActivity : Activity() {
                 socket.close()
             } catch (e: Exception) {
                 Handler(Looper.getMainLooper()).post {
-                    tvResult.text = "❌ 测试异常：${e.message}"
+                    tvResult.text = "❌ 连接异常：${e.message}\n请确保官方 App 正在后台运行。"
                 }
             }
         }.start()
